@@ -29,6 +29,8 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
   private $routeMatch;
 
   /**
+   * Entity storage to load all view entities.
+   *
    * @var \Drupal\Core\Config\Entity\ConfigEntityStorage
    */
   private $entityStorage;
@@ -49,6 +51,10 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
   /**
    * Creates a new ViewsCondition object.
    *
+   * @param \Drupal\Core\Entity\EntityStorageInterface $entity_storage
+   *   Entity storage object to get all view entities.
+   * @param \Drupal\Core\Routing\CurrentRouteMatch $route_match
+   *   Route match object.
    * @param array $configuration
    *   The plugin configuration, i.e. an array with configuration values keyed
    *   by configuration option name. The special key 'context' may be used to
@@ -58,9 +64,6 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
    *   The plugin_id for the plugin instance.
    * @param mixed $plugin_definition
    *   The plugin implementation definition.
-   * @param \Drupal\Core\Routing\CurrentRouteMatch $route_match
-   *   Route match.
-   * @param \Drupal\Core\Entity\EntityStorageInterface $entity_storage
    */
   public function __construct(EntityStorageInterface $entity_storage, CurrentRouteMatch $route_match, array $configuration, $plugin_id, $plugin_definition) {
     $this->routeMatch = $route_match;
@@ -120,7 +123,6 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
         ],
       ];
 
-
       foreach ($displays as $display) {
         $default_value = !empty($this->configuration['views'][$view->id()][$display['id']]) ? $this->configuration['views'][$view->id()][$display['id']] : 0;
         $form['views'][$view->id()][$display['id']] = [
@@ -172,10 +174,11 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
    * {@inheritdoc}
    */
   public function defaultConfiguration() {
-    return [
-        'application' => '',
-        'views' => [],
-      ] + parent::defaultConfiguration();
+    $config = [
+      'application' => '',
+      'views' => [],
+    ];
+    return $config + parent::defaultConfiguration();
   }
 
   /**
