@@ -33,22 +33,11 @@
        * @return {string}
        *   A string with the summary.
        */
-      function checkboxesSummary(context) {
-        var views = $(context).find('[data-drupal-selector="edit-visibility-views-condition-view-pages"]').is(':checked');
-        var negate = $(context).find('[data-drupal-selector="edit-visibility-views-condition-negate"]').is(':checked');
-
-        if (views && negate) {
-          return Drupal.t('Do not apply to view pages.');
-        }
-
-        if ((!views && negate) || (views && !negate)) {
-          return Drupal.t('Apply to view pages.');
-        }
-
-        return Drupal.t('Not restricted');
+      function radioSummary(context) {
+        return $(context).find('input[type="radio"]:checked + label').first().html();
       }
 
-      $('[data-drupal-selector="edit-visibility-views-condition"]').drupalSetSummary(checkboxesSummary);
+      $('.views-condition-application').first().closest('details').drupalSetSummary(radioSummary);
     }
   };
 

@@ -3,3 +3,5 @@ type: module
 description: Conditonally apply if the page is a view.
 core: 8.x
 package: Custom
+dependencies:
+  - views

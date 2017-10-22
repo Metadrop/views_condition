@@ -3,6 +3,7 @@
 namespace Drupal\views_condition\Plugin\Condition;
 
 use Drupal\Core\Condition\ConditionPluginBase;
+use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\Routing\CurrentRouteMatch;
@@ -14,7 +15,8 @@ use Drupal\Core\Condition\ConditionInterface;
  *
  * @Condition(
  *   id = "views_condition",
- *   label = @Translation("Views")
+ *   label = @Translation("Views"),
+ *   module = "views_condition"
  * )
  */
 class ViewsCondition extends ConditionPluginBase implements ConditionInterface, ContainerFactoryPluginInterface {
@@ -27,14 +29,20 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
   private $routeMatch;
 
   /**
+   * @var \Drupal\Core\Config\Entity\ConfigEntityStorage
+   */
+  private $entityStorage;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     return new static(
+      $container->get('entity.manager')->getStorage('view'),
+      $container->get('current_route_match'),
       $configuration,
       $plugin_id,
-      $plugin_definition,
-      $container->get('current_route_match')
+      $plugin_definition
     );
   }
 
@@ -52,9 +60,11 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
    *   The plugin implementation definition.
    * @param \Drupal\Core\Routing\CurrentRouteMatch $route_match
    *   Route match.
+   * @param \Drupal\Core\Entity\EntityStorageInterface $entity_storage
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, CurrentRouteMatch $route_match) {
+  public function __construct(EntityStorageInterface $entity_storage, CurrentRouteMatch $route_match, array $configuration, $plugin_id, $plugin_definition) {
     $this->routeMatch = $route_match;
+    $this->entityStorage = $entity_storage;
     parent::__construct($configuration, $plugin_id, $plugin_definition);
 
   }
@@ -63,11 +73,59 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
    * {@inheritdoc}
    */
   public function buildConfigurationForm(array $form, FormStateInterface $form_state) {
-    $form['view_pages'] = [
-      '#type' => 'checkbox',
-      '#title' => $this->t('Apply to view pages.'),
-      '#default_value' => $this->configuration['view_pages'],
+    $form['application'] = [
+      '#type' => 'radios',
+      '#title' => $this->t('Views Condition'),
+      '#default_value' => $this->configuration['application'],
+      '#options' => [
+        '' => $this->t('Not Restricted'),
+        'all_pages' => $this->t('All View Pages'),
+        'specific_views' => $this->t('Specific View Pages'),
+      ],
+      '#attributes' => [
+        'class' => ['views-condition-application'],
+      ],
     ];
+
+    $views = $this->entityStorage->loadMultiple();
+    /** @var \Drupal\views\Entity\View $view */
+    foreach ($views as $view) {
+      $displays = $view->get('display');
+      // Don't include the master display, and skip this view if thats the only
+      // display in the view.
+      unset($displays['default']);
+      foreach ($displays as $display_id => $display) {
+        if ($display['display_plugin'] != 'page' || (isset($display['display_options']['enabled']) && !$display['display_options']['enabled'])) {
+          unset($displays[$display_id]);
+        }
+      }
+
+      if (!$view->status() || empty($displays)) {
+        continue;
+      }
+
+      $form['views'][$view->id()] = [
+        '#type' => 'details',
+        '#title' => $view->label(),
+        '#open' => FALSE,
+        '#states' => [
+          'visible' => [
+            'input[name*="application"]' => ['value' => 'specific_views'],
+          ],
+        ],
+      ];
+
+
+      foreach ($displays as $display) {
+        $default_value = !empty($this->configuration['views'][$view->id()][$display['id']]) ? $this->configuration['views'][$view->id()][$display['id']] : 0;
+        $form['views'][$view->id()][$display['id']] = [
+          '#type' => 'checkbox',
+          '#title' => $display['display_title'],
+          '#default_value' => $default_value,
+        ];
+      }
+    }
+
     $form['#attached']['library'][] = 'views_condition/views_condition';
     return parent::buildConfigurationForm($form, $form_state);
   }
@@ -75,8 +133,33 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
   /**
    * {@inheritdoc}
    */
+  public function validateConfigurationForm(array &$form, FormStateInterface $form_state) {
+    parent::validateConfigurationForm($form, $form_state);
+
+    if ($form_state->getValue('application') != 'specific_views') {
+      $form_state->setValue('views', []);
+      return;
+    }
+
+    $views_chosen = $form_state->getValue('views');
+    foreach ($views_chosen as $view_id => &$displays) {
+      $displays = array_filter($displays);
+      if (empty($displays)) {
+        unset($views_chosen[$view_id]);
+      }
+    }
+    if (!$views_chosen) {
+      $form_state->setError($form['application'], $this->t('No views selected for condition.'));
+    }
+    $form_state->setValue('views', $views_chosen);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function submitConfigurationForm(array &$form, FormStateInterface $form_state) {
-    $this->configuration['view_pages'] = $form_state->getValue('view_pages');
+    $this->configuration['application'] = $form_state->getValue('application');
+    $this->configuration['views'] = $form_state->getValue('views');
     parent::submitConfigurationForm($form, $form_state);
   }
 
@@ -84,52 +167,64 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
    * {@inheritdoc}
    */
   public function defaultConfiguration() {
-    return ['view_pages' => 0] + parent::defaultConfiguration();
+    return [
+        'application' => '',
+        'views' => [],
+      ] + parent::defaultConfiguration();
   }
 
   /**
    * {@inheritdoc}
    */
   public function evaluate() {
-
-    if (!empty($this->configuration['view_pages'])) {
-      // DON'T Display on view pages.
-      if ($this->isNegated()) {
-        if ($this->onViewsPage()) {
-          return TRUE;
-        }
-      }
-
-      // Display on view pages.
-      else {
-        if ($this->onViewsPage()) {
-          return TRUE;
-        }
-      }
-
-    }
-    elseif ($this->isNegated() && !$this->onViewsPage()) {
-      return TRUE;
+    // Simple condition if specified to apply to all pages.
+    if ($this->configuration['application'] == 'all_pages') {
+      return (bool) $this->routeMatch->getParameter('view_id');
     }
 
-    return FALSE;
-  }
+    $view_id = $this->routeMatch->getParameter('view_id');
+    $display_id = $this->routeMatch->getParameter('display_id');
 
-  /**
-   * Use current route to determine if its on a view page.
-   *
-   * @return bool
-   *   If on a view page.
-   */
-  private function onViewsPage() {
-    return (bool) $this->routeMatch->getParameter('view_id');
+    return !empty($this->configuration['views'][$view_id][$display_id]);
   }
 
   /**
    * {@inheritdoc}
    */
   public function summary() {
-    return t('Applied to view pages.');
+    if ($this->configuration['application'] == 'all_pages') {
+      return t('Applied to all view pages.');
+    }
+
+    $summary = [];
+    /** @var \Drupal\views\Entity\View $view */
+    foreach ($this->entityStorage->loadMultiple(array_keys($this->configuration['views'])) as $view) {
+      $display_summary = [];
+      $displays = $view->get('display');
+      $chosen_displays = $this->configuration['views'][$view->id()];
+
+      foreach (array_keys($chosen_displays) as $display_id) {
+        if (isset($displays[$display_id])) {
+          $display_summary[] = $displays[$display_id]['display_title'];
+        }
+      }
+
+      $summary[] = $view->label() . ': ' . implode(', ', $display_summary);
+    }
+
+    return t('View Pages - @views', ['@views' => implode("; ", $summary)]);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function calculateDependencies() {
+    $dependencies = parent::calculateDependencies();
+    $dependencies['module'][] = 'views';
+    foreach (array_keys($this->configuration['views']) as $view_id) {
+      $dependencies['config'][] = "views.view.$view_id";
+    }
+    return $dependencies;
   }
 
 }
