@@ -67,6 +67,11 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
     $this->entityStorage = $entity_storage;
     parent::__construct($configuration, $plugin_id, $plugin_definition);
 
+    // Legacy support to change the configuration values.
+    if (isset($this->configuration['view_pages'])) {
+      $this->configuration['application'] = $this->configuration['view_pages'] ? 'all_pages' : '';
+      unset($this->configuration['view_pages']);
+    }
   }
 
   /**
