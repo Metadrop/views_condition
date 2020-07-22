@@ -40,7 +40,7 @@ class ViewsCondition extends ConditionPluginBase implements ConditionInterface, 
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     return new static(
-      $container->get('entity.manager')->getStorage('view'),
+      $container->get('entity_type.manager')->getStorage('view'),
       $container->get('current_route_match'),
       $configuration,
       $plugin_id,

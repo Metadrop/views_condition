@@ -2,6 +2,7 @@ name: Views Condition
 type: module
 description: Conditonally apply if the page is a view.
 core: 8.x
+core_version_requirement: ^8 || ^9
 package: Views
 dependencies:
   - views
